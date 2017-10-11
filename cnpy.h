@@ -16,8 +16,13 @@
 #include<zlib.h>
 #include<map>
 #include<memory>
-#include<stdint.h>
 #include<numeric>
+#include<complex>
+#include<cstdlib>
+#include<algorithm>
+#include<cstring>
+#include<iomanip>
+#include<stdint.h>
 
 namespace cnpy {
 
@@ -57,7 +62,10 @@ namespace cnpy {
    
     using npz_t = std::map<std::string, NpyArray>; 
 
-    char BigEndianTest();
+    inline char BigEndianTest() {
+        int x = 1;
+        return (((char *)&x)[0]) ? '<' : '>';
+    }
     char map_type(const std::type_info& t);
     template<typename T> std::vector<char> create_npy_header(const std::vector<size_t>& shape);
     void parse_npy_header(FILE* fp,size_t& word_size, std::vector<size_t>& shape, bool& fortran_order);
@@ -86,41 +94,20 @@ namespace cnpy {
         if(mode == "a") fp = fopen(fname.c_str(),"r+b");
 
         if(fp) {
-            //file exists. we need to append to it. read the header, modify the array size
-            size_t word_size;
-            bool fortran_order;
-            parse_npy_header(fp,word_size,true_data_shape,fortran_order);
-            assert(!fortran_order);
-
-            if(word_size != sizeof(T)) {
-                std::cout<<"libnpy error: "<<fname<<" has word size "<<word_size<<" but npy_save appending data sized "<<sizeof(T)<<"\n";
-                assert( word_size == sizeof(T) );
-            }
-            if(true_data_shape.size() != shape.size()) {
-                std::cout<<"libnpy error: npy_save attempting to append misdimensioned data to "<<fname<<"\n";
-                assert(true_data_shape.size() != shape.size());
-            }
-
-            for(size_t i = 1; i < shape.size(); i++) {
-                if(shape[i] != true_data_shape[i]) {
-                    std::cout<<"libnpy error: npy_save attempting to append misshaped data to "<<fname<<"\n";
-                    assert(shape[i] == true_data_shape[i]);
-                }
-            }
-            true_data_shape[0] += shape[0];
+            std::cerr << "File concatenation is not supported. Aborting" << std::endl;
         }
         else {
             fp = fopen(fname.c_str(),"wb");
             true_data_shape = shape;
+
+            std::vector<char> header = create_npy_header<T>(true_data_shape);
+            size_t nels = std::accumulate(shape.begin(),shape.end(),1,std::multiplies<size_t>());
+
+            fseek(fp,0,SEEK_SET);
+            fwrite(&header[0],sizeof(char),header.size(),fp);
+            fseek(fp,0,SEEK_END);
+            fwrite(data,sizeof(T),nels,fp);
         }
-
-        std::vector<char> header = create_npy_header<T>(true_data_shape);
-        size_t nels = std::accumulate(shape.begin(),shape.end(),1,std::multiplies<size_t>());
-
-        fseek(fp,0,SEEK_SET);
-        fwrite(&header[0],sizeof(char),header.size(),fp);
-        fseek(fp,0,SEEK_END);
-        fwrite(data,sizeof(T),nels,fp);
         fclose(fp);
     }
 
@@ -256,6 +243,49 @@ namespace cnpy {
 
         return header;
     }
+    
+    inline char map_type(const std::type_info& t)
+    {
+        if(t == typeid(float) ) return 'f';
+        if(t == typeid(double) ) return 'f';
+        if(t == typeid(long double) ) return 'f';
+
+        if(t == typeid(int) ) return 'i';
+        if(t == typeid(char) ) return 'i';
+        if(t == typeid(short) ) return 'i';
+        if(t == typeid(long) ) return 'i';
+        if(t == typeid(long long) ) return 'i';
+
+        if(t == typeid(unsigned char) ) return 'u';
+        if(t == typeid(unsigned short) ) return 'u';
+        if(t == typeid(unsigned long) ) return 'u';
+        if(t == typeid(unsigned long long) ) return 'u';
+        if(t == typeid(unsigned int) ) return 'u';
+
+        if(t == typeid(bool) ) return 'b';
+
+        if(t == typeid(std::complex<float>) ) return 'c';
+        if(t == typeid(std::complex<double>) ) return 'c';
+        if(t == typeid(std::complex<long double>) ) return 'c';
+
+        else return '?';
+    }
+
+    template<> std::vector<char>& operator+=(std::vector<char>& lhs, const std::string rhs) {
+        lhs.insert(lhs.end(),rhs.begin(),rhs.end());
+        return lhs;
+    }
+
+    template<> std::vector<char>& operator+=(std::vector<char>& lhs, const char* rhs) {
+        //write in little endian
+        size_t len = strlen(rhs);
+        lhs.reserve(len);
+        for(size_t byte = 0; byte < len; byte++) {
+            lhs.push_back(rhs[byte]);
+        }
+        return lhs;
+    }
+
 
 
 }
